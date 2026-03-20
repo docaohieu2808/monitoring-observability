@@ -1,0 +1,42 @@
+# Data directories
+data/
+tmp/
+**/data/
+**/tmp/
+
+# Loki storage
+loki/chunks/
+loki/rules/
+loki/wal/
+loki/compactor/
+
+# Tempo storage
+tempo/blocks/
+tempo/wal/
+tempo/generator/
+
+# Prometheus data
+prometheus/data/
+
+# Grafana data
+grafana/data/
+
+# Go build artifacts
+custom-exporter/**/*.exe
+custom-exporter/**/custom-exporter
+custom-exporter/**/vendor/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Secrets / env overrides
+*.env
+.env*
+secrets/

@@ -1,0 +1,28 @@
+{
+  "type": "panel",
+  "name": "Custom Metrics Panel",
+  "id": "myorg-custom-metrics-panel",
+  "info": {
+    "description": "Custom panel plugin skeleton for displaying application metrics",
+    "author": {
+      "name": "MyOrg",
+      "url": "https://example.com"
+    },
+    "keywords": ["panel", "metrics", "custom"],
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "links": [],
+    "screenshots": [],
+    "version": "1.0.0",
+    "updated": "2024-01-01"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=10.0.0",
+    "plugins": []
+  },
+  "roles": [],
+  "includes": [],
+  "state": "alpha"
+}

@@ -1,0 +1,48 @@
+groups:
+  - name: service.alerts
+    interval: 1m
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down on {{ $labels.instance }}"
+          description: "Scrape target {{ $labels.instance }} (job: {{ $labels.job }}) has been unreachable for more than 1 minute"
+
+      - alert: PrometheusTargetMissing
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus target missing: {{ $labels.instance }}"
+          description: "A Prometheus target has disappeared. An exporter might be crashed."
+
+      - alert: PrometheusScrapeDurationSlow
+        expr: prometheus_target_interval_length_seconds{quantile="0.99"} > 60
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus scrape duration slow on {{ $labels.instance }}"
+          description: "Prometheus scrape duration p99 is {{ $value | printf \"%.1f\" }}s"
+
+      - alert: RedisExporterDown
+        expr: up{job="redis-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis exporter down on {{ $labels.instance }}"
+          description: "Redis exporter has been unreachable for more than 1 minute"
+
+      - alert: PostgresExporterDown
+        expr: up{job="postgres-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL exporter down on {{ $labels.instance }}"
+          description: "PostgreSQL exporter has been unreachable for more than 1 minute"

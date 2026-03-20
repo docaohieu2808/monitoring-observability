@@ -1,0 +1,87 @@
+groups:
+  - name: postgresql.alerts
+    interval: 1m
+    rules:
+      - alert: PostgresqlTooManyConnections
+        expr: sum(pg_stat_activity_count) by (instance) > (pg_settings_max_connections * 0.8)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL too many connections on {{ $labels.instance }}"
+          description: "{{ $value | printf \"%.0f\" }} connections (>80% of max_connections)"
+
+      - alert: PostgresqlDeadLocks
+        expr: increase(pg_stat_database_deadlocks[1m]) > 5
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL deadlocks detected on {{ $labels.instance }}"
+          description: "{{ $value | printf \"%.0f\" }} deadlocks in the last minute on database {{ $labels.datname }}"
+
+      - alert: PostgresqlLowCacheHitRate
+        expr: avg(pg_stat_database_blks_hit / (pg_stat_database_blks_hit + pg_stat_database_blks_read + 1)) by (instance) < 0.99
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL low cache hit rate on {{ $labels.instance }}"
+          description: "Cache hit rate is {{ $value | printf \"%.2f\" }} (expected > 0.99)"
+
+      - alert: PostgresqlHighRollbackRate
+        expr: rate(pg_stat_database_xact_rollback[5m]) / (rate(pg_stat_database_xact_commit[5m]) + rate(pg_stat_database_xact_rollback[5m])) > 0.02
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High PostgreSQL rollback rate on {{ $labels.instance }}"
+          description: "Rollback rate is {{ $value | printf \"%.2f\" }} on {{ $labels.datname }}"
+
+      - alert: PostgresqlReplicationLag
+        expr: pg_replication_lag > 30
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL replication lag on {{ $labels.instance }}"
+          description: "Replication lag is {{ $value | printf \"%.0f\" }}s (threshold: 30s)"
+
+  - name: redis.alerts
+    interval: 1m
+    rules:
+      - alert: RedisHighMemoryUsage
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis high memory usage on {{ $labels.instance }}"
+          description: "Redis memory usage is {{ $value | printf \"%.1f\" }}% of max"
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis is down on {{ $labels.instance }}"
+          description: "Redis instance has been unreachable for more than 1 minute"
+
+      - alert: RedisTooManyConnections
+        expr: redis_connected_clients > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis too many connections on {{ $labels.instance }}"
+          description: "{{ $value | printf \"%.0f\" }} connected clients (threshold: 100)"
+
+      - alert: RedisKeyEvictions
+        expr: increase(redis_evicted_keys_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis key evictions on {{ $labels.instance }}"
+          description: "{{ $value | printf \"%.0f\" }} keys evicted in the last 5 minutes"

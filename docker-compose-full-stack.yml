@@ -1,0 +1,174 @@
+networks:
+  traefik-network:
+    external: true
+  monitoring-internal:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  loki-data:
+  tempo-data:
+  alertmanager-data:
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/l1-basic-scrape-config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/l2-alerting-rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+      - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver
+    networks:
+      - traefik-network
+      - monitoring-internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./prometheus/l5-alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.external-url=http://203.0.113.15:9093
+    networks:
+      - traefik-network
+      - monitoring-internal
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=changeme
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_DOMAIN=203.0.113.15
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/l2-provisioning/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./grafana/l2-provisioning/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - traefik-network
+      - monitoring-internal
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/l3-loki-config/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    command:
+      - -config.file=/etc/loki/loki-config.yml
+    networks:
+      - traefik-network
+      - monitoring-internal
+
+  promtail:
+    image: grafana/promtail:3.0.0
+    container_name: promtail
+    restart: unless-stopped
+    ports:
+      - "9080:9080"
+    volumes:
+      - ./loki/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - -config.file=/etc/promtail/promtail-config.yml
+    networks:
+      - monitoring-internal
+    depends_on:
+      - loki
+
+  tempo:
+    image: grafana/tempo:2.4.2
+    container_name: tempo
+    restart: unless-stopped
+    ports:
+      - "3200:3200"
+      - "9411:9411"
+      - "14268:14268"
+    volumes:
+      - ./tempo/l4-tempo-config/tempo-config.yml:/etc/tempo/tempo-config.yml:ro
+      - tempo-data:/tmp/tempo
+    command:
+      - -config.file=/etc/tempo/tempo-config.yml
+    networks:
+      - traefik-network
+      - monitoring-internal
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.100.0
+    container_name: otel-collector
+    restart: unless-stopped
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8888:8888"
+      - "13133:13133"
+      - "55679:55679"
+    volumes:
+      - ./opentelemetry/l4-otel-collector/otel-collector-config.yml:/etc/otel/otel-collector-config.yml:ro
+    command:
+      - --config=/etc/otel/otel-collector-config.yml
+    networks:
+      - traefik-network
+      - monitoring-internal
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+  custom-exporter:
+    build:
+      context: ./custom-exporter/l-max-go-exporter
+      dockerfile_inline: |
+        FROM golang:1.22-alpine AS builder
+        WORKDIR /app
+        COPY go.mod ./
+        RUN go mod download
+        COPY . .
+        RUN go build -o custom-exporter .
+        FROM alpine:3.19
+        COPY --from=builder /app/custom-exporter /usr/local/bin/custom-exporter
+        EXPOSE 9200
+        ENTRYPOINT ["/usr/local/bin/custom-exporter"]
+    container_name: custom-exporter
+    restart: unless-stopped
+    ports:
+      - "9200:9200"
+    environment:
+      - LISTEN_ADDR=:9200
+      - METRICS_NAMESPACE=app
+    networks:
+      - monitoring-internal

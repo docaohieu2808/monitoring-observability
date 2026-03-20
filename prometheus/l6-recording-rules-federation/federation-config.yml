@@ -1,0 +1,40 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: server-2-federated
+    env: production
+
+scrape_configs:
+  # Federation: pull pre-computed recording rules from a remote Prometheus
+  - job_name: federate-primary
+    scrape_interval: 1m
+    honor_labels: true
+    metrics_path: /federate
+    params:
+      match[]:
+        - '{__name__=~"instance:.*"}'
+        - '{__name__=~"job:.*"}'
+        - 'up'
+        - 'scrape_duration_seconds'
+    static_configs:
+      - targets:
+          - prometheus-primary:9090
+        labels:
+          federated_from: primary
+
+  # Local scrape of this server's exporters for local dashboards
+  - job_name: node-exporter-local
+    static_configs:
+      - targets:
+          - 203.0.113.15:9100
+
+  - job_name: postgres-exporter-local
+    static_configs:
+      - targets:
+          - 203.0.113.15:9187
+
+  - job_name: redis-exporter-local
+    static_configs:
+      - targets:
+          - 203.0.113.15:9121
