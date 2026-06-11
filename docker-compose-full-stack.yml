@@ -13,7 +13,7 @@ volumes:
 
 services:
   prometheus:
-    image: prom/prometheus:v2.51.2
+    image: prom/prometheus:v3.4.1
     container_name: prometheus
     restart: unless-stopped
     ports:
@@ -26,8 +26,6 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=30d
-      - --web.console.libraries=/usr/share/prometheus/console_libraries
-      - --web.console.templates=/usr/share/prometheus/consoles
       - --web.enable-lifecycle
       - --web.enable-remote-write-receiver
     networks:
@@ -48,7 +46,7 @@ services:
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
-      - --web.external-url=http://203.0.113.15:9093
+      - --web.external-url=http://${SERVER2_IP:-<server2-ip>}:9093
     networks:
       - traefik-network
       - monitoring-internal
@@ -63,7 +61,7 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=changeme
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_DOMAIN=203.0.113.15
+      - GF_SERVER_DOMAIN=${SERVER2_IP:-<server2-ip>}
       - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
     volumes:
       - grafana-data:/var/lib/grafana

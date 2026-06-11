@@ -3,7 +3,7 @@ global:
   evaluation_interval: 15s
   scrape_timeout: 10s
   external_labels:
-    cluster: server-2
+    cluster: demo
     env: production
 
 rule_files:
@@ -24,7 +24,7 @@ scrape_configs:
   - job_name: node-exporter
     static_configs:
       - targets:
-          - 203.0.113.15:9100
+          - ${SERVER2_IP:-<server2-ip>}:9100
     relabel_configs:
       - source_labels: [__address__]
         target_label: instance
@@ -34,7 +34,7 @@ scrape_configs:
   - job_name: postgres-exporter
     static_configs:
       - targets:
-          - 203.0.113.15:9187
+          - ${SERVER2_IP:-<server2-ip>}:9187
     relabel_configs:
       - source_labels: [__address__]
         target_label: instance
@@ -44,7 +44,7 @@ scrape_configs:
   - job_name: redis-exporter
     static_configs:
       - targets:
-          - 203.0.113.15:9121
+          - ${SERVER2_IP:-<server2-ip>}:9121
     relabel_configs:
       - source_labels: [__address__]
         target_label: instance

@@ -2,7 +2,7 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
-    cluster: server-2-federated
+    cluster: demo-federated
     env: production
 
 scrape_configs:
@@ -27,14 +27,14 @@ scrape_configs:
   - job_name: node-exporter-local
     static_configs:
       - targets:
-          - 203.0.113.15:9100
+          - ${SERVER2_IP:-<server2-ip>}:9100
 
   - job_name: postgres-exporter-local
     static_configs:
       - targets:
-          - 203.0.113.15:9187
+          - ${SERVER2_IP:-<server2-ip>}:9187
 
   - job_name: redis-exporter-local
     static_configs:
       - targets:
-          - 203.0.113.15:9121
+          - ${SERVER2_IP:-<server2-ip>}:9121

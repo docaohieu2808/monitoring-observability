@@ -16,17 +16,17 @@ route:
   repeat_interval: 4h
   receiver: default-receiver
   routes:
-    - match:
-        severity: critical
+    - matchers:
+        - severity = critical
       receiver: critical-receiver
       continue: true
-    - match:
-        severity: warning
+    - matchers:
+        - severity = warning
       receiver: slack-warnings
       group_interval: 10m
       repeat_interval: 12h
-    - match_re:
-        alertname: Postgres.*|Redis.*
+    - matchers:
+        - alertname =~ "Postgres.*|Redis.*"
       receiver: dba-receiver
       group_by: [alertname, instance]
 
@@ -91,8 +91,8 @@ receivers:
         send_resolved: true
 
 inhibit_rules:
-  - source_match:
-      severity: critical
-    target_match:
-      severity: warning
+  - source_matchers:
+      - severity = critical
+    target_matchers:
+      - severity = warning
     equal: [alertname, instance]

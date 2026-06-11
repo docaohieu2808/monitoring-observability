@@ -39,7 +39,7 @@ metrics_generator:
   registry:
     external_labels:
       source: tempo
-      cluster: server-2
+      cluster: demo
   storage:
     path: /tmp/tempo/generator/wal
     remote_write:
