@@ -36,6 +36,12 @@ prom_up() {
 
 now_ns() { date +%s%N; }
 
+# --- 0. Images without a shell (loki, tempo, collector, alloy) have no compose healthcheck ---
+retry "loki ready" curl -fs "$LOKI/ready"
+retry "tempo ready" curl -fs "$TEMPO/ready"
+retry "otel collector healthy" curl -fs http://127.0.0.1:13133/
+retry "alloy ready" curl -fs http://127.0.0.1:12345/-/ready
+
 # --- 1. Prometheus targets ------------------------------------------------
 for job in prometheus alertmanager loki tempo otel-collector alloy grafana custom-exporter node-exporter; do
   retry "prometheus target up: $job" prom_up "$PROM" "$job"

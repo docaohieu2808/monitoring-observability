@@ -119,11 +119,7 @@ services:
       - loki-data:/loki
     command:
       - -config.file=/etc/loki/loki-config.yml
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3100/ready"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
+    # No healthcheck: the Loki image ships no shell or wget. scripts/smoke-test.sh polls /ready instead.
 
   # Grafana Alloy replaces Promtail (EOL 2026-03-02).
   alloy:
