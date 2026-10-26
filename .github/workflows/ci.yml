@@ -130,16 +130,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: compose config
-        run: docker compose -f docker-compose-full-stack.yml config --quiet
+        run: docker compose config --quiet
       - name: up --wait
-        run: docker compose -f docker-compose-full-stack.yml up -d --build --wait --wait-timeout 300
+        run: docker compose up -d --build --wait --wait-timeout 300
       - name: smoke test
         run: ./scripts/smoke-test.sh
       - name: container state and logs on failure
         if: failure()
         run: |
-          docker compose -f docker-compose-full-stack.yml ps -a
-          docker compose -f docker-compose-full-stack.yml logs --no-color --tail=80
+          docker compose ps -a
+          docker compose logs --no-color --tail=80
       - name: tear down
         if: always()
-        run: docker compose -f docker-compose-full-stack.yml down -v
+        run: docker compose down -v

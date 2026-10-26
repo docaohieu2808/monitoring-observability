@@ -1,4 +1,4 @@
-# Full observability stack. Bring up with:  docker compose -f docker-compose-full-stack.yml up -d --wait
+# Full observability stack. Bring up with:  docker compose up -d --wait
 # Defaults work as-is; see .env.example for the few knobs. Ports bind to 127.0.0.1 only.
 name: monitoring-observability
 

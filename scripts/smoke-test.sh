@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end smoke test for the compose stack. Run after:
-#   docker compose -f docker-compose-full-stack.yml up -d --build --wait
+#   docker compose up -d --build --wait
 # Checks: Prometheus targets are up, rules are loaded, a log line reaches Loki (via Alloy and via
 # the OTel Collector's OTLP path), a trace reaches Tempo through the collector, Grafana datasources work.
 set -euo pipefail
