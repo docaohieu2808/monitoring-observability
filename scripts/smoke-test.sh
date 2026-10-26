@@ -90,9 +90,50 @@ tempo_has() { curl -fs "$TEMPO/api/traces/$trace_id" | jq -e '.. | .name? // emp
 retry "trace $trace_id reaches Tempo via OTel Collector" tempo_has
 
 # --- 6. Grafana datasources reach their backends --------------------------
+# The health endpoint returns {"status":"OK"} on success and a 4xx/5xx with another status otherwise;
+# check the body, not just the HTTP code.
+ds_health_ok() { # ds_health_ok <uid>
+  curl -fs -u "$GRAFANA_AUTH" "$GRAFANA/api/datasources/uid/$1/health" | jq -e '.status == "OK"'
+}
 for uid in prometheus loki tempo; do
-  retry "grafana datasource healthy: $uid" \
-    curl -fs -u "$GRAFANA_AUTH" "$GRAFANA/api/datasources/uid/$uid/health"
+  retry "grafana datasource healthy: $uid" ds_health_ok "$uid"
+done
+
+# Negative control: a datasource pointing at a closed port must NOT report OK, otherwise the check
+# above could never fail. The temporary datasource is removed again on exit.
+broken_uid=smoke-broken-prometheus
+cleanup_broken() { curl -s -o /dev/null -X DELETE -u "$GRAFANA_AUTH" "$GRAFANA/api/datasources/uid/$broken_uid" || true; }
+trap cleanup_broken EXIT
+curl -fs -u "$GRAFANA_AUTH" -X POST -H 'Content-Type: application/json' "$GRAFANA/api/datasources" \
+  -d "{\"name\":\"$broken_uid\",\"uid\":\"$broken_uid\",\"type\":\"prometheus\",\"access\":\"proxy\",\"url\":\"http://prometheus:1\"}" >/dev/null ||
+  fail "create broken datasource for the negative control"
+broken_status=$(curl -s -u "$GRAFANA_AUTH" "$GRAFANA/api/datasources/uid/$broken_uid/health" | jq -r '.status // "none"')
+[ "$broken_status" != "OK" ] || fail "broken datasource reported OK: the health check cannot detect failures"
+pass "grafana health check rejects a datasource with a wrong URL (status: $broken_status)"
+cleanup_broken
+trap - EXIT
+
+# --- 7. Provisioned dashboards: all present, every panel datasource resolves ---
+datasources=$(curl -fs -u "$GRAFANA_AUTH" "$GRAFANA/api/datasources")
+for dash in docker-containers node-exporter-full postgresql-overview redis-overview; do
+  retry "grafana dashboard provisioned: $dash" \
+    sh -c "curl -fs -u '$GRAFANA_AUTH' '$GRAFANA/api/search?type=dash-db' | jq -e --arg u '$dash' 'map(.uid) | index(\$u) != null'"
+  model=$(curl -fs -u "$GRAFANA_AUTH" "$GRAFANA/api/dashboards/uid/$dash" | jq '.dashboard')
+  # Every {datasource: {uid}} reference must be a provisioned uid, or a ${datasource} variable whose
+  # plugin type has at least one provisioned datasource. Fails when a dashboard has no panels or refs.
+  echo "$model" | jq -e --argjson ds "$datasources" '
+    . as $d
+    | ([$d.panels[]? | recurse(.panels[]?)] | map(select(.type != "row"))) as $panels
+    | [$panels[] | (.datasource?, (.targets[]?.datasource?)) | select(type == "object")] as $refs
+    | ($panels | length) > 0 and ($refs | length) > 0 and
+      all($refs[];
+        .uid as $uid
+        | if ($uid | test("^\\$\\{?datasource\\}?$"))
+          then ([$d.templating.list[] | select(.type == "datasource" and .name == "datasource") | .query] as $types
+                | ($types | length) == 1 and ($ds | map(.type) | index($types[0]) != null))
+          else ($ds | map(.uid) | index($uid) != null) end)
+  ' >/dev/null || fail "dashboard $dash: a panel datasource does not resolve to a provisioned datasource"
+  pass "dashboard $dash: panels and datasource references resolve"
 done
 
 echo "ALL SMOKE CHECKS PASSED"

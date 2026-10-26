@@ -1,4 +1,6 @@
 # promtool test rules prometheus/l2-alerting-rules/tests/alerts.test.yml
+# Every alert in alert-rules-*.yml has a case that fires (labels + annotations asserted) and a case that
+# must stay quiet. scripts/check-alert-test-coverage.sh fails CI when a new alert has no case.
 rule_files:
   - ../alert-rules-service.yml
   - ../alert-rules-node.yml
@@ -131,3 +133,385 @@ tests:
             exp_annotations:
               summary: "Redis high memory usage on cache-1"
               description: "Redis memory usage is 95.0% of max"
+
+  # ---- node alerts ------------------------------------------------------------------------------
+  # Idle CPU counter grows by 6s per 60s sample = 0.1 idle cores/s = 90 percent busy.
+  - interval: 1m
+    name: HighCpuUsage fires at 90 percent busy but CriticalCpuUsage does not
+    input_series:
+      - series: 'node_cpu_seconds_total{instance="host-a", mode="idle", cpu="0"}'
+        values: '0+6x15'
+      - series: 'node_cpu_seconds_total{instance="host-a", mode="user", cpu="0"}'
+        values: '0+54x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HighCpuUsage
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: host-a
+            exp_annotations:
+              summary: "High CPU usage on host-a"
+              description: "CPU usage is 90.0% on host-a (threshold: 80%)"
+      - eval_time: 10m
+        alertname: CriticalCpuUsage
+        exp_alerts: []
+
+  - interval: 1m
+    name: HighCpuUsage and CriticalCpuUsage stay quiet at 50 percent busy
+    input_series:
+      - series: 'node_cpu_seconds_total{instance="host-a", mode="idle", cpu="0"}'
+        values: '0+30x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HighCpuUsage
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: CriticalCpuUsage
+        exp_alerts: []
+
+  - interval: 1m
+    name: CriticalCpuUsage fires at 99 percent busy
+    input_series:
+      - series: 'node_cpu_seconds_total{instance="host-a", mode="idle", cpu="0"}'
+        values: '0+0.6x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: CriticalCpuUsage
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: host-a
+            exp_annotations:
+              summary: "Critical CPU usage on host-a"
+              description: "CPU usage is 99.0% on host-a (threshold: 95%)"
+
+  - interval: 1m
+    name: HighMemoryUsage stays quiet at 40 percent used
+    input_series:
+      - series: 'node_memory_MemTotal_bytes{instance="host-b"}'
+        values: '100x15'
+      - series: 'node_memory_MemAvailable_bytes{instance="host-b"}'
+        values: '60x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HighMemoryUsage
+        exp_alerts: []
+
+  - interval: 1m
+    name: HighDiskUsage fires at 90 percent and skips tmpfs and overlay
+    input_series:
+      - series: 'node_filesystem_size_bytes{instance="host-a", mountpoint="/", fstype="ext4"}'
+        values: '1000x15'
+      - series: 'node_filesystem_avail_bytes{instance="host-a", mountpoint="/", fstype="ext4"}'
+        values: '100x15'
+      - series: 'node_filesystem_size_bytes{instance="host-a", mountpoint="/run", fstype="tmpfs"}'
+        values: '1000x15'
+      - series: 'node_filesystem_avail_bytes{instance="host-a", mountpoint="/run", fstype="tmpfs"}'
+        values: '10x15'
+      - series: 'node_filesystem_size_bytes{instance="host-a", mountpoint="/var/lib/docker", fstype="overlay"}'
+        values: '1000x15'
+      - series: 'node_filesystem_avail_bytes{instance="host-a", mountpoint="/var/lib/docker", fstype="overlay"}'
+        values: '10x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HighDiskUsage
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: host-a
+              mountpoint: /
+              fstype: ext4
+            exp_annotations:
+              summary: "High disk usage on host-a:/"
+              description: "Disk usage is 90.0% on host-a:/ (threshold: 85%)"
+      - eval_time: 10m
+        alertname: DiskSpaceCritical
+        exp_alerts: []
+
+  - interval: 1m
+    name: HighDiskUsage stays quiet at 50 percent used
+    input_series:
+      - series: 'node_filesystem_size_bytes{instance="host-a", mountpoint="/", fstype="ext4"}'
+        values: '1000x15'
+      - series: 'node_filesystem_avail_bytes{instance="host-a", mountpoint="/", fstype="ext4"}'
+        values: '500x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HighDiskUsage
+        exp_alerts: []
+
+  # 200 MiB/s on eth0 = 12000 MiB per 60s sample; veth and lo are excluded; eth1 is quiet (10 MiB/s).
+  - interval: 1m
+    name: HighNetworkReceive fires above 100 MiB/s on a real NIC only
+    input_series:
+      - series: 'node_network_receive_bytes_total{instance="host-a", device="eth0"}'
+        values: '0+12582912000x15'
+      - series: 'node_network_receive_bytes_total{instance="host-a", device="veth1234"}'
+        values: '0+12582912000x15'
+      - series: 'node_network_receive_bytes_total{instance="host-a", device="lo"}'
+        values: '0+12582912000x15'
+      - series: 'node_network_receive_bytes_total{instance="host-a", device="eth1"}'
+        values: '0+629145600x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HighNetworkReceive
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: host-a
+              device: eth0
+            exp_annotations:
+              summary: "High network receive on host-a:eth0"
+              description: "Network receive rate is 209.7MB/s"
+
+  - interval: 1m
+    name: HighNetworkReceive stays quiet at 10 MiB/s
+    input_series:
+      - series: 'node_network_receive_bytes_total{instance="host-a", device="eth0"}'
+        values: '0+629145600x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HighNetworkReceive
+        exp_alerts: []
+
+  # ---- service alerts: negative cases ------------------------------------------------------------
+  - interval: 1m
+    name: PrometheusScrapeDurationSlow stays quiet for fast scrapes
+    input_series:
+      - series: 'scrape_duration_seconds{job="node-exporter", instance="host-a"}'
+        values: '0.02x12'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PrometheusScrapeDurationSlow
+        exp_alerts: []
+
+  # ---- postgresql alerts ------------------------------------------------------------------------
+  - interval: 1m
+    name: PostgresqlTooManyConnections fires above 80 percent of max_connections
+    input_series:
+      - series: 'pg_stat_activity_count{instance="db-1", state="active"}'
+        values: '50x15'
+      - series: 'pg_stat_activity_count{instance="db-1", state="idle"}'
+        values: '40x15'
+      - series: 'pg_settings_max_connections{instance="db-1"}'
+        values: '100x15'
+      - series: 'pg_stat_activity_count{instance="db-2", state="active"}'
+        values: '10x15'
+      - series: 'pg_settings_max_connections{instance="db-2"}'
+        values: '100x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PostgresqlTooManyConnections
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: db-1
+            exp_annotations:
+              summary: "PostgreSQL too many connections on db-1"
+              description: "90 connections (>80% of max_connections)"
+
+  - interval: 1m
+    name: PostgresqlTooManyConnections stays quiet at 10 percent
+    input_series:
+      - series: 'pg_stat_activity_count{instance="db-2", state="active"}'
+        values: '10x15'
+      - series: 'pg_settings_max_connections{instance="db-2"}'
+        values: '100x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PostgresqlTooManyConnections
+        exp_alerts: []
+
+  # The deadlock counter grows by 12 per minute window (threshold: more than 5).
+  - interval: 15s
+    name: PostgresqlDeadLocks fires on a fast growing counter
+    input_series:
+      - series: 'pg_stat_database_deadlocks{instance="db-1", datname="app"}'
+        values: '0+3x40'
+      - series: 'pg_stat_database_deadlocks{instance="db-2", datname="app"}'
+        values: '7x40'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PostgresqlDeadLocks
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: db-1
+              datname: app
+            exp_annotations:
+              summary: "PostgreSQL deadlocks detected on db-1"
+              description: "12 deadlocks in the last minute on database app"
+
+  - interval: 15s
+    name: PostgresqlDeadLocks stays quiet when the counter is flat
+    input_series:
+      - series: 'pg_stat_database_deadlocks{instance="db-2", datname="app"}'
+        values: '7x40'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PostgresqlDeadLocks
+        exp_alerts: []
+
+  - interval: 1m
+    name: PostgresqlLowCacheHitRate fires below 99 percent
+    input_series:
+      - series: 'pg_stat_database_blks_hit{instance="db-1", datname="app"}'
+        values: '900x15'
+      - series: 'pg_stat_database_blks_read{instance="db-1", datname="app"}'
+        values: '100x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PostgresqlLowCacheHitRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: db-1
+            exp_annotations:
+              summary: "PostgreSQL low cache hit rate on db-1"
+              description: "Cache hit rate is 0.90 (expected > 0.99)"
+
+  - interval: 1m
+    name: PostgresqlLowCacheHitRate stays quiet at 99.9 percent
+    input_series:
+      - series: 'pg_stat_database_blks_hit{instance="db-1", datname="app"}'
+        values: '99900x15'
+      - series: 'pg_stat_database_blks_read{instance="db-1", datname="app"}'
+        values: '10x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PostgresqlLowCacheHitRate
+        exp_alerts: []
+
+  # Per minute: 5 rollbacks and 95 commits = 5 percent rollbacks.
+  - interval: 1m
+    name: PostgresqlHighRollbackRate fires at 5 percent rollbacks
+    input_series:
+      - series: 'pg_stat_database_xact_rollback{instance="db-1", datname="app"}'
+        values: '0+5x15'
+      - series: 'pg_stat_database_xact_commit{instance="db-1", datname="app"}'
+        values: '0+95x15'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: PostgresqlHighRollbackRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: db-1
+              datname: app
+            exp_annotations:
+              summary: "High PostgreSQL rollback rate on db-1"
+              description: "Rollback rate is 0.05 on app"
+
+  - interval: 1m
+    name: PostgresqlHighRollbackRate stays quiet at 0.5 percent rollbacks
+    input_series:
+      - series: 'pg_stat_database_xact_rollback{instance="db-1", datname="app"}'
+        values: '0+0.5x15'
+      - series: 'pg_stat_database_xact_commit{instance="db-1", datname="app"}'
+        values: '0+99.5x15'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: PostgresqlHighRollbackRate
+        exp_alerts: []
+
+  - interval: 1m
+    name: PostgresqlReplicationLag stays quiet at 5 seconds
+    input_series:
+      - series: 'pg_replication_lag_seconds{instance="db-1"}'
+        values: '5x5'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PostgresqlReplicationLag
+        exp_alerts: []
+
+  # ---- redis alerts -----------------------------------------------------------------------------
+  - interval: 1m
+    name: RedisHighMemoryUsage stays quiet at 50 percent
+    input_series:
+      - series: 'redis_memory_used_bytes{instance="cache-1"}'
+        values: '50x15'
+      - series: 'redis_memory_max_bytes{instance="cache-1"}'
+        values: '100x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RedisHighMemoryUsage
+        exp_alerts: []
+
+  - interval: 1m
+    name: RedisDown fires after a minute of redis_up==0 and not for a healthy instance
+    input_series:
+      - series: 'redis_up{instance="cache-1", job="redis-exporter"}'
+        values: '1 1 0 0 0 0 0 0'
+      - series: 'redis_up{instance="cache-2", job="redis-exporter"}'
+        values: '1x7'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: RedisDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: RedisDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: cache-1
+              job: redis-exporter
+            exp_annotations:
+              summary: "Redis is down on cache-1"
+              description: "Redis instance has been unreachable for more than 1 minute"
+
+  - interval: 1m
+    name: RedisTooManyConnections fires above 100 clients
+    input_series:
+      - series: 'redis_connected_clients{instance="cache-1"}'
+        values: '150x15'
+      - series: 'redis_connected_clients{instance="cache-2"}'
+        values: '20x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RedisTooManyConnections
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: cache-1
+            exp_annotations:
+              summary: "Redis too many connections on cache-1"
+              description: "150 connected clients (threshold: 100)"
+
+  - interval: 1m
+    name: RedisTooManyConnections stays quiet at exactly 100 clients
+    input_series:
+      - series: 'redis_connected_clients{instance="cache-2"}'
+        values: '100x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RedisTooManyConnections
+        exp_alerts: []
+
+  - interval: 1m
+    name: RedisKeyEvictions fires when evictions grow and not when the counter is flat
+    input_series:
+      - series: 'redis_evicted_keys_total{instance="cache-1"}'
+        values: '0+10x15'
+      - series: 'redis_evicted_keys_total{instance="cache-2"}'
+        values: '42x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RedisKeyEvictions
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: cache-1
+            exp_annotations:
+              summary: "Redis key evictions on cache-1"
+              description: "50 keys evicted in the last 5 minutes"
+
+  - interval: 1m
+    name: RedisKeyEvictions stays quiet when the eviction counter is flat
+    input_series:
+      - series: 'redis_evicted_keys_total{instance="cache-2"}'
+        values: '42x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RedisKeyEvictions
+        exp_alerts: []

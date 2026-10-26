@@ -78,18 +78,20 @@ Runs on push, pull request, weekly (Mon 02:17 UTC) and manually.
 
 | Job | Checks |
 |-----|--------|
-| lint | actionlint, yamllint, shellcheck, dashboard JSON, hadolint |
-| prometheus | `promtool check config` (l1, l6), `promtool check rules`, `promtool test rules` (alert + recording rule unit tests), `amtool check-config` |
+| lint | actionlint, yamllint, shellcheck, dashboard JSON, hadolint, `scripts/check-alert-test-coverage.py` (every alert has a firing and a not-firing case) |
+| prometheus | `promtool check config` (l1, l6), `promtool check rules`, `promtool test rules` (every alert rule has a case that fires, with labels and annotations asserted, and one that must stay quiet; plus recording rules), `amtool check-config` |
 | backends | `loki -verify-config`, `tempo -config.verify`, `otelcol validate`, `alloy validate` |
 | exporter | `go mod tidy` clean, gofmt, vet, build, `go test -race` |
-| stack-smoke | `docker compose up --wait`, then `scripts/smoke-test.sh`: every Prometheus target up, rule groups loaded, a log line reaches Loki via Alloy and via the collector, a trace reaches Tempo through the collector, Grafana datasources healthy |
+| stack-smoke | `docker compose up --wait`, then `scripts/smoke-test.sh`: every Prometheus target up, rule groups loaded, a log line reaches Loki via Alloy and via the collector, a trace reaches Tempo through the collector, Grafana datasources healthy (body must say `OK`; a deliberately broken datasource must not), all 4 dashboards provisioned and every panel datasource resolves to a provisioned datasource |
 
 ## Honest limits
 
 - The stack is a single-node lab: filesystem storage, no auth between components, Grafana default password.
   Do not expose it to the internet.
-- Postgres and Redis alert rules, recording rules and dashboards are unit-tested with synthetic series only; no
-  Postgres/Redis exporter runs in the compose stack.
+- Postgres and Redis alert rules and recording rules are unit-tested with synthetic series only; no
+  Postgres/Redis exporter runs in the compose stack. Dashboards are checked for valid JSON, for being
+  provisioned, and for datasource references that resolve; panel queries are not executed, so a wrong
+  metric name inside a panel is not caught.
 - Alertmanager receivers use placeholder URLs and keys (`changeme`); notifications are not delivered anywhere.
 - Alloy tails Docker containers through `/var/run/docker.sock` (read-only mount, but still privileged access).
 - The Grafana plugin in `l-max` is a manifest skeleton only.
