@@ -1,3 +1,8 @@
+# Tempo 3.x single binary (-target=all). Tempo 3 removed the ingester/compactor modules (live-store,
+# block-builder and backend-scheduler replace them) and the OpenCensus receiver. See
+# https://github.com/grafana/tempo/tree/main/example/docker-compose/single-binary
+stream_over_http_enabled: true
+
 server:
   http_listen_port: 3200
   log_level: info
@@ -14,26 +19,23 @@ distributor:
       protocols:
         thrift_http:
           endpoint: 0.0.0.0:14268
-        grpc:
-          endpoint: 0.0.0.0:14250
     zipkin:
       endpoint: 0.0.0.0:9411
 
-ingester:
-  max_block_duration: 5m
-  trace_idle_period: 10s
-
-compactor:
-  compaction:
-    block_retention: 48h
+# Block retention moved from compactor.compaction to the backend scheduler in Tempo 3.
+backend_scheduler:
+  provider:
+    compaction:
+      compaction:
+        block_retention: 48h
 
 storage:
   trace:
     backend: local
-    local:
-      path: /tmp/tempo/blocks
     wal:
-      path: /tmp/tempo/wal
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
 
 metrics_generator:
   registry:
@@ -41,7 +43,7 @@ metrics_generator:
       source: tempo
       cluster: demo
   storage:
-    path: /tmp/tempo/generator/wal
+    path: /var/tempo/generator/wal
     remote_write:
       - url: http://prometheus:9090/api/v1/write
         send_exemplars: true
@@ -51,3 +53,6 @@ overrides:
     metrics_generator:
       processors: [service-graphs, span-metrics]
       generate_native_histograms: both
+
+usage_report:
+  reporting_enabled: false

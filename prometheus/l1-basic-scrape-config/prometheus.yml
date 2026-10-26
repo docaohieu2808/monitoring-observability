@@ -1,13 +1,18 @@
+# Prometheus does NOT expand ${VAR} inside its config file. Targets that differ per
+# environment live in file_sd files (targets/*.yml), which Prometheus re-reads on change
+# without a restart. Edit those files instead of this one.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
   scrape_timeout: 10s
   external_labels:
     cluster: demo
-    env: production
+    env: lab
 
+# Paths are relative to this file. In the compose stack ./prometheus is mounted at /etc/prometheus.
 rule_files:
-  - /etc/prometheus/rules/*.yml
+  - ../l2-alerting-rules/*.yml
+  - ../l6-recording-rules-federation/recording-rules.yml
 
 alerting:
   alertmanagers:
@@ -16,15 +21,44 @@ alerting:
             - alertmanager:9093
 
 scrape_configs:
+  # Components of the stack itself (static, service names from docker compose).
   - job_name: prometheus
     static_configs:
-      - targets:
-          - localhost:9090
+      - targets: [localhost:9090]
 
-  - job_name: node-exporter
+  - job_name: alertmanager
     static_configs:
-      - targets:
-          - ${SERVER2_IP:-<server2-ip>}:9100
+      - targets: [alertmanager:9093]
+
+  - job_name: loki
+    static_configs:
+      - targets: [loki:3100]
+
+  - job_name: tempo
+    static_configs:
+      - targets: [tempo:3200]
+
+  - job_name: otel-collector
+    static_configs:
+      - targets: [otel-collector:8888]
+
+  - job_name: alloy
+    static_configs:
+      - targets: [alloy:12345]
+
+  - job_name: grafana
+    static_configs:
+      - targets: [grafana:3000]
+
+  - job_name: custom-exporter
+    static_configs:
+      - targets: [custom-exporter:9200]
+
+  # Per-environment exporters: targets come from file_sd (the "templating step").
+  # The path is absolute because file_sd resolves relative paths against the working directory.
+  - job_name: node-exporter
+    file_sd_configs:
+      - files: [/etc/prometheus/l1-basic-scrape-config/targets/node-exporter.yml]
     relabel_configs:
       - source_labels: [__address__]
         target_label: instance
@@ -32,9 +66,8 @@ scrape_configs:
         replacement: $1
 
   - job_name: postgres-exporter
-    static_configs:
-      - targets:
-          - ${SERVER2_IP:-<server2-ip>}:9187
+    file_sd_configs:
+      - files: [/etc/prometheus/l1-basic-scrape-config/targets/postgres-exporter.yml]
     relabel_configs:
       - source_labels: [__address__]
         target_label: instance
@@ -42,9 +75,8 @@ scrape_configs:
         replacement: $1
 
   - job_name: redis-exporter
-    static_configs:
-      - targets:
-          - ${SERVER2_IP:-<server2-ip>}:9121
+    file_sd_configs:
+      - files: [/etc/prometheus/l1-basic-scrape-config/targets/redis-exporter.yml]
     relabel_configs:
       - source_labels: [__address__]
         target_label: instance

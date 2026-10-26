@@ -1,0 +1,54 @@
+# promtool test rules prometheus/l6-recording-rules-federation/tests/recording-rules.test.yml
+rule_files:
+  - ../recording-rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: node utilisation recording rules
+    input_series:
+      - series: 'node_memory_MemTotal_bytes{instance="host-a", job="node-exporter"}'
+        values: '100x5'
+      - series: 'node_memory_MemAvailable_bytes{instance="host-a", job="node-exporter"}'
+        values: '25x5'
+    promql_expr_test:
+      - expr: instance:node_memory_utilisation:ratio
+        eval_time: 2m
+        exp_samples:
+          - labels: 'instance:node_memory_utilisation:ratio{instance="host-a", job="node-exporter"}'
+            value: 0.75
+
+  - interval: 1m
+    name: pg connection ratio joins on instance despite the extra labels
+    input_series:
+      - series: 'pg_stat_activity_count{instance="db-1", datname="app", state="active"}'
+        values: '30x5'
+      - series: 'pg_stat_activity_count{instance="db-1", datname="app", state="idle"}'
+        values: '20x5'
+      - series: 'pg_settings_max_connections{instance="db-1", job="postgres-exporter"}'
+        values: '100x5'
+    promql_expr_test:
+      - expr: instance:pg_connections_utilisation:ratio
+        eval_time: 2m
+        exp_samples:
+          - labels: 'instance:pg_connections_utilisation:ratio{instance="db-1"}'
+            value: 0.5
+
+  - interval: 1m
+    name: redis memory ratio skips instances without maxmemory
+    input_series:
+      - series: 'redis_memory_used_bytes{instance="cache-1"}'
+        values: '50x5'
+      - series: 'redis_memory_max_bytes{instance="cache-1"}'
+        values: '200x5'
+      - series: 'redis_memory_used_bytes{instance="cache-2"}'
+        values: '50x5'
+      - series: 'redis_memory_max_bytes{instance="cache-2"}'
+        values: '0x5'
+    promql_expr_test:
+      - expr: instance:redis_memory_utilisation:ratio
+        eval_time: 2m
+        exp_samples:
+          - labels: 'instance:redis_memory_utilisation:ratio{instance="cache-1"}'
+            value: 0.25

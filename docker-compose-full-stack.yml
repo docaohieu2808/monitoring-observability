@@ -1,11 +1,10 @@
-networks:
-  traefik-network:
-    external: true
-  monitoring-internal:
-    driver: bridge
+# Full observability stack. Bring up with:  docker compose -f docker-compose-full-stack.yml up -d --wait
+# Defaults work as-is; see .env.example for the few knobs. Ports bind to 127.0.0.1 only.
+name: monitoring-observability
 
 volumes:
   prometheus-data:
+  prometheus-global-data:
   grafana-data:
   loki-data:
   tempo-data:
@@ -13,135 +12,167 @@ volumes:
 
 services:
   prometheus:
-    image: prom/prometheus:v3.4.1
+    image: prom/prometheus:v3.15.1
     container_name: prometheus
     restart: unless-stopped
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
-      - ./prometheus/l1-basic-scrape-config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./prometheus/l2-alerting-rules:/etc/prometheus/rules:ro
+      # The whole ./prometheus tree is mounted so rule_files globs and file_sd targets resolve.
+      - ./prometheus:/etc/prometheus:ro
       - prometheus-data:/prometheus
     command:
-      - --config.file=/etc/prometheus/prometheus.yml
+      - --config.file=/etc/prometheus/l1-basic-scrape-config/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=30d
       - --web.enable-lifecycle
       - --web.enable-remote-write-receiver
-    networks:
-      - traefik-network
-      - monitoring-internal
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - --enable-feature=exemplar-storage
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # l6: a second Prometheus that federates recording-rule series from the first one.
+  prometheus-global:
+    image: prom/prometheus:v3.15.1
+    container_name: prometheus-global
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9091:9090"
+    volumes:
+      - ./prometheus/l6-recording-rules-federation/federation-config.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-global-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  node-exporter:
+    image: prom/node-exporter:v1.12.1
+    container_name: node-exporter
+    restart: unless-stopped
+    expose:
+      - "9100"
 
   alertmanager:
-    image: prom/alertmanager:v0.27.0
+    image: prom/alertmanager:v0.34.1
     container_name: alertmanager
     restart: unless-stopped
     ports:
-      - "9093:9093"
+      - "127.0.0.1:9093:9093"
     volumes:
       - ./prometheus/l5-alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager-data:/alertmanager
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
-      - --web.external-url=http://${SERVER2_IP:-<server2-ip>}:9093
-    networks:
-      - traefik-network
-      - monitoring-internal
+      - --web.external-url=${ALERTMANAGER_EXTERNAL_URL:-http://localhost:9093}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9093/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   grafana:
-    image: grafana/grafana:10.4.2
+    image: grafana/grafana:13.2.4
     container_name: grafana
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=changeme
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_DOMAIN=${SERVER2_IP:-<server2-ip>}
-      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-changeme}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_DOMAIN: ${GRAFANA_DOMAIN:-localhost}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/l2-provisioning/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
       - ./grafana/l2-provisioning/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-    networks:
-      - traefik-network
-      - monitoring-internal
     depends_on:
       - prometheus
       - loki
       - tempo
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
 
   loki:
-    image: grafana/loki:3.0.0
+    image: grafana/loki:3.7.9
     container_name: loki
     restart: unless-stopped
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     volumes:
       - ./loki/l3-loki-config/loki-config.yml:/etc/loki/loki-config.yml:ro
       - loki-data:/loki
     command:
       - -config.file=/etc/loki/loki-config.yml
-    networks:
-      - traefik-network
-      - monitoring-internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3100/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
 
-  promtail:
-    image: grafana/promtail:3.0.0
-    container_name: promtail
+  # Grafana Alloy replaces Promtail (EOL 2026-03-02).
+  alloy:
+    image: grafana/alloy:v1.21.2
+    container_name: alloy
     restart: unless-stopped
     ports:
-      - "9080:9080"
+      - "127.0.0.1:12345:12345"
     volumes:
-      - ./loki/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - ./loki/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - /var/log:/var/log:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     command:
-      - -config.file=/etc/promtail/promtail-config.yml
-    networks:
-      - monitoring-internal
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy/data
+      - --server.http.listen-addr=0.0.0.0:12345
     depends_on:
       - loki
 
   tempo:
-    image: grafana/tempo:2.4.2
+    image: grafana/tempo:3.1.1
     container_name: tempo
     restart: unless-stopped
     ports:
-      - "3200:3200"
-      - "9411:9411"
-      - "14268:14268"
+      - "127.0.0.1:3200:3200"
+      - "127.0.0.1:9411:9411"
+      - "127.0.0.1:14268:14268"
     volumes:
       - ./tempo/l4-tempo-config/tempo-config.yml:/etc/tempo/tempo-config.yml:ro
-      - tempo-data:/tmp/tempo
+      - tempo-data:/var/tempo
     command:
+      - -target=all
       - -config.file=/etc/tempo/tempo-config.yml
-    networks:
-      - traefik-network
-      - monitoring-internal
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.100.0
+    image: otel/opentelemetry-collector-contrib:0.163.2
     container_name: otel-collector
     restart: unless-stopped
     ports:
-      - "4317:4317"
-      - "4318:4318"
-      - "8888:8888"
-      - "13133:13133"
-      - "55679:55679"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:8888:8888"
+      - "127.0.0.1:13133:13133"
+      - "127.0.0.1:55679:55679"
     volumes:
       - ./opentelemetry/l4-otel-collector/otel-collector-config.yml:/etc/otel/otel-collector-config.yml:ro
     command:
       - --config=/etc/otel/otel-collector-config.yml
-    networks:
-      - traefik-network
-      - monitoring-internal
     depends_on:
       - prometheus
       - loki
@@ -150,23 +181,10 @@ services:
   custom-exporter:
     build:
       context: ./custom-exporter/l-max-go-exporter
-      dockerfile_inline: |
-        FROM golang:1.22-alpine AS builder
-        WORKDIR /app
-        COPY go.mod ./
-        RUN go mod download
-        COPY . .
-        RUN go build -o custom-exporter .
-        FROM alpine:3.19
-        COPY --from=builder /app/custom-exporter /usr/local/bin/custom-exporter
-        EXPOSE 9200
-        ENTRYPOINT ["/usr/local/bin/custom-exporter"]
     container_name: custom-exporter
     restart: unless-stopped
     ports:
-      - "9200:9200"
+      - "127.0.0.1:9200:9200"
     environment:
-      - LISTEN_ADDR=:9200
-      - METRICS_NAMESPACE=app
-    networks:
-      - monitoring-internal
+      LISTEN_ADDR: ":9200"
+      METRICS_NAMESPACE: app

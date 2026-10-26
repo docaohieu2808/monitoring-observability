@@ -1,0 +1,4 @@
+# file_sd targets for job node-exporter. The compose stack ships a node-exporter container.
+# Add more hosts as extra "- host:9100" entries.
+- targets:
+    - node-exporter:9100

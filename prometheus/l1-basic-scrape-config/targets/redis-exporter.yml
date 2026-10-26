@@ -1,0 +1,3 @@
+# file_sd targets for job redis-exporter. Empty by default: the compose stack has no Redis.
+# Example: put "- 192.0.2.10:9121" under targets.
+- targets: []

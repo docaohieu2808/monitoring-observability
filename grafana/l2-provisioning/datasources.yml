@@ -1,7 +1,9 @@
 apiVersion: 1
 
+# Explicit uids: the Tempo datasource and the Prometheus exemplar link refer to the others by uid.
 datasources:
   - name: Prometheus
+    uid: prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090
@@ -9,12 +11,12 @@ datasources:
     jsonData:
       httpMethod: POST
       exemplarTraceIdDestinations:
-        - name: traceID
+        - name: trace_id
           datasourceUid: tempo
-    version: 1
     editable: false
 
   - name: Loki
+    uid: loki
     type: loki
     access: proxy
     url: http://loki:3100
@@ -24,7 +26,6 @@ datasources:
           matcherRegex: '"trace_id":"(\w+)"'
           name: TraceID
           url: $${__value.raw}
-    version: 1
     editable: false
 
   - name: Tempo
@@ -36,7 +37,13 @@ datasources:
       httpMethod: GET
       serviceMap:
         datasourceUid: prometheus
-      lokiSearch:
+      tracesToLogsV2:
         datasourceUid: loki
-    version: 1
+        spanStartTimeShift: -5m
+        spanEndTimeShift: 5m
+        filterByTraceID: true
+        filterBySpanID: false
+        tags:
+          - key: service.name
+            value: service_name
     editable: false

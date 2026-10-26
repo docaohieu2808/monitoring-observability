@@ -1,0 +1,133 @@
+# promtool test rules prometheus/l2-alerting-rules/tests/alerts.test.yml
+rule_files:
+  - ../alert-rules-service.yml
+  - ../alert-rules-node.yml
+  - ../alert-rules-database.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: TargetDown fires after 1m of up==0, healthy target stays quiet
+    input_series:
+      - series: 'up{job="node-exporter", instance="host-a"}'
+        values: '1 1 0 0 0 0 0 0'
+      - series: 'up{job="node-exporter", instance="host-b"}'
+        values: '1x7'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: TargetDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: TargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: node-exporter
+              instance: host-a
+            exp_annotations:
+              summary: "Target host-a (job node-exporter) is down"
+              description: "Scrape target host-a (job: node-exporter) has been unreachable for more than 1 minute"
+
+  - interval: 1m
+    name: PrometheusScrapeDurationSlow uses scrape_duration_seconds
+    input_series:
+      - series: 'scrape_duration_seconds{job="redis-exporter", instance="host-a"}'
+        values: '12x12'
+      - series: 'scrape_duration_seconds{job="node-exporter", instance="host-a"}'
+        values: '0.02x12'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PrometheusScrapeDurationSlow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: redis-exporter
+              instance: host-a
+            exp_annotations:
+              summary: "Slow scrapes of host-a (job redis-exporter)"
+              description: "Scraping host-a takes 12.0s (threshold: 10s)"
+
+  - interval: 1m
+    name: HighMemoryUsage fires at 95 percent used
+    input_series:
+      - series: 'node_memory_MemTotal_bytes{instance="host-a"}'
+        values: '100x15'
+      - series: 'node_memory_MemAvailable_bytes{instance="host-a"}'
+        values: '5x15'
+      - series: 'node_memory_MemTotal_bytes{instance="host-b"}'
+        values: '100x15'
+      - series: 'node_memory_MemAvailable_bytes{instance="host-b"}'
+        values: '60x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HighMemoryUsage
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: host-a
+            exp_annotations:
+              summary: "High memory usage on host-a"
+              description: "Memory usage is 95.0% on host-a (threshold: 90%)"
+
+  - interval: 1m
+    name: DiskSpaceCritical fires only above 95 percent
+    input_series:
+      - series: 'node_filesystem_size_bytes{instance="host-a", mountpoint="/", fstype="ext4"}'
+        values: '1000x15'
+      - series: 'node_filesystem_avail_bytes{instance="host-a", mountpoint="/", fstype="ext4"}'
+        values: '30x15'
+      - series: 'node_filesystem_size_bytes{instance="host-a", mountpoint="/data", fstype="ext4"}'
+        values: '1000x15'
+      - series: 'node_filesystem_avail_bytes{instance="host-a", mountpoint="/data", fstype="ext4"}'
+        values: '100x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DiskSpaceCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: host-a
+              mountpoint: /
+              fstype: ext4
+            exp_annotations:
+              summary: "Critical disk space on host-a:/"
+              description: "Disk usage is 97.0% on host-a:/"
+
+  - interval: 1m
+    name: PostgresqlReplicationLag uses the renamed pg_replication_lag_seconds
+    input_series:
+      - series: 'pg_replication_lag_seconds{instance="db-1"}'
+        values: '45x5'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PostgresqlReplicationLag
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: db-1
+            exp_annotations:
+              summary: "PostgreSQL replication lag on db-1"
+              description: "Replication lag is 45s (threshold: 30s)"
+
+  - interval: 1m
+    name: RedisHighMemoryUsage ignores instances without maxmemory
+    input_series:
+      - series: 'redis_memory_used_bytes{instance="cache-1"}'
+        values: '95x15'
+      - series: 'redis_memory_max_bytes{instance="cache-1"}'
+        values: '100x15'
+      - series: 'redis_memory_used_bytes{instance="cache-2"}'
+        values: '95x15'
+      - series: 'redis_memory_max_bytes{instance="cache-2"}'
+        values: '0x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RedisHighMemoryUsage
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: cache-1
+            exp_annotations:
+              summary: "Redis high memory usage on cache-1"
+              description: "Redis memory usage is 95.0% of max"

@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /custom-exporter/l-max-go-exporter
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /custom-exporter/l-max-go-exporter
+    schedule:
+      interval: weekly
+  # Image tags in the compose file (prometheus, grafana, loki, tempo, alloy, otel, alertmanager).
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly

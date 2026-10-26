@@ -39,7 +39,7 @@ groups:
           description: "Rollback rate is {{ $value | printf \"%.2f\" }} on {{ $labels.datname }}"
 
       - alert: PostgresqlReplicationLag
-        expr: pg_replication_lag > 30
+        expr: pg_replication_lag_seconds > 30
         for: 1m
         labels:
           severity: critical
@@ -51,7 +51,8 @@ groups:
     interval: 1m
     rules:
       - alert: RedisHighMemoryUsage
-        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+        # redis_memory_max_bytes is 0 when maxmemory is unset; `> 0` drops those series instead of dividing by zero.
+        expr: redis_memory_used_bytes / (redis_memory_max_bytes > 0) * 100 > 90
         for: 5m
         labels:
           severity: warning

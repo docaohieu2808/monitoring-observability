@@ -7,16 +7,7 @@ receivers:
         endpoint: 0.0.0.0:4318
         cors:
           allowed_origins:
-            - "http://*"
-            - "https://*"
-
-  prometheus:
-    config:
-      scrape_configs:
-        - job_name: otel-collector
-          scrape_interval: 15s
-          static_configs:
-            - targets: [localhost:8888]
+            - "http://localhost:*"
 
   hostmetrics:
     scrape_interval: 15s
@@ -27,8 +18,6 @@ receivers:
       load:
       memory:
       network:
-      process:
-        mute_process_name_error: true
 
 processors:
   batch:
@@ -44,14 +33,14 @@ processors:
   resource:
     attributes:
       - key: cluster
-        value: server-2
+        value: demo
         action: upsert
       - key: env
-        value: production
+        value: lab
         action: upsert
 
   resourcedetection:
-    detectors: [env, system, docker]
+    detectors: [env, system]
     timeout: 5s
     override: false
 
@@ -66,13 +55,9 @@ exporters:
     tls:
       insecure_skip_verify: true
 
-  loki:
-    endpoint: http://loki:3100/loki/api/v1/push
-    default_labels_enabled:
-      exporter: true
-      job: true
-      instance: true
-      level: true
+  # The dedicated `loki` exporter was removed from collector-contrib. Loki 3 ingests OTLP natively.
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
 
   debug:
     verbosity: basic
@@ -82,13 +67,11 @@ exporters:
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
-  pprof:
-    endpoint: 0.0.0.0:1777
   zpages:
     endpoint: 0.0.0.0:55679
 
 service:
-  extensions: [health_check, pprof, zpages]
+  extensions: [health_check, zpages]
   pipelines:
     traces:
       receivers: [otlp]
@@ -96,18 +79,23 @@ service:
       exporters: [otlp/tempo, debug]
 
     metrics:
-      receivers: [otlp, prometheus, hostmetrics]
+      receivers: [otlp, hostmetrics]
       processors: [memory_limiter, resource, resourcedetection, batch]
       exporters: [prometheusremotewrite, debug]
 
     logs:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
-      exporters: [loki, debug]
+      exporters: [otlphttp/loki, debug]
 
   telemetry:
     logs:
       level: info
     metrics:
       level: detailed
-      address: 0.0.0.0:8888
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888

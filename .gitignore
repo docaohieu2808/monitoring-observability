@@ -39,4 +39,5 @@ Thumbs.db
 # Secrets / env overrides
 *.env
 .env*
+!.env.example
 secrets/

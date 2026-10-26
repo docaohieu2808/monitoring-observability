@@ -1,0 +1,69 @@
+// Grafana Alloy replaces Promtail (end of life 2026-03-02). Same job: tail Docker container logs and
+// host log files, label them, and push them to Loki.
+
+// ---- Docker container logs -------------------------------------------------
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "project"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  forward_to = [loki.process.json_logs.receiver]
+}
+
+// ---- Host log files (the paths are absent on hosts without them; that is fine) ----
+local.file_match "host_logs" {
+  path_targets = [
+    {"__path__" = "/var/log/syslog", "job" = "syslog"},
+    {"__path__" = "/var/log/auth.log", "job" = "auth"},
+  ]
+}
+
+loki.source.file "host_logs" {
+  targets    = local.file_match.host_logs.targets
+  forward_to = [loki.process.json_logs.receiver]
+}
+
+// ---- Parse JSON app logs: level becomes a label, trace_id structured metadata ----
+loki.process "json_logs" {
+  stage.json {
+    expressions = {
+      level    = "level",
+      trace_id = "trace_id",
+    }
+  }
+  stage.labels {
+    values = {level = ""}
+  }
+  // High-cardinality, so never a label.
+  stage.structured_metadata {
+    values = {trace_id = ""}
+  }
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

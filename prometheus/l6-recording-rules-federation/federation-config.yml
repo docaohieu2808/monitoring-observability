@@ -1,12 +1,13 @@
+# Second ("global") Prometheus that federates pre-aggregated series from the primary.
+# Run by the compose service prometheus-global. Federation scrapes the primary's /federate.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
     cluster: demo-federated
-    env: production
+    env: lab
 
 scrape_configs:
-  # Federation: pull pre-computed recording rules from a remote Prometheus
   - job_name: federate-primary
     scrape_interval: 1m
     honor_labels: true
@@ -19,22 +20,11 @@ scrape_configs:
         - 'scrape_duration_seconds'
     static_configs:
       - targets:
-          - prometheus-primary:9090
+          - prometheus:9090
         labels:
           federated_from: primary
 
-  # Local scrape of this server's exporters for local dashboards
-  - job_name: node-exporter-local
+  # Local scrape for this instance's own health.
+  - job_name: prometheus-global
     static_configs:
-      - targets:
-          - ${SERVER2_IP:-<server2-ip>}:9100
-
-  - job_name: postgres-exporter-local
-    static_configs:
-      - targets:
-          - ${SERVER2_IP:-<server2-ip>}:9187
-
-  - job_name: redis-exporter-local
-    static_configs:
-      - targets:
-          - ${SERVER2_IP:-<server2-ip>}:9121
+      - targets: [localhost:9090]

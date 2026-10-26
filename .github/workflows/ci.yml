@@ -1,0 +1,145 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # Weekly: upstream images and exporter dependencies move even when this repo does not.
+    - cron: "17 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROMETHEUS_IMAGE: prom/prometheus:v3.15.1
+  ALERTMANAGER_IMAGE: prom/alertmanager:v0.34.1
+  LOKI_IMAGE: grafana/loki:3.7.9
+  TEMPO_IMAGE: grafana/tempo:3.1.1
+  OTELCOL_IMAGE: otel/opentelemetry-collector-contrib:0.163.2
+  ALLOY_IMAGE: grafana/alloy:v1.21.2
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: actionlint
+        run: docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.12 -color
+      - name: yamllint
+        run: |
+          pip install --quiet yamllint==1.38.0
+          yamllint --strict .
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+      - name: dashboards are valid JSON
+        run: |
+          for f in grafana/dashboards/*.json grafana/l-max-custom-plugin/*.json; do
+            jq -e . "$f" >/dev/null && echo "ok $f"
+          done
+      - name: hadolint
+        run: docker run --rm -i hadolint/hadolint:v2.15.1 < custom-exporter/l-max-go-exporter/Dockerfile
+
+  prometheus:
+    name: prometheus (l1 l2 l5 l6)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # ./prometheus is mounted at /etc/prometheus, exactly as in the compose stack, so rule_files
+      # globs and the absolute file_sd paths resolve.
+      - name: promtool check config (l1 scrape config)
+        run: |
+          docker run --rm --entrypoint promtool -v "$PWD/prometheus:/etc/prometheus:ro" "$PROMETHEUS_IMAGE" \
+            check config /etc/prometheus/l1-basic-scrape-config/prometheus.yml
+      - name: promtool check config (l6 federation)
+        run: |
+          docker run --rm --entrypoint promtool -v "$PWD/prometheus:/etc/prometheus:ro" "$PROMETHEUS_IMAGE" \
+            check config /etc/prometheus/l6-recording-rules-federation/federation-config.yml
+      - name: promtool check rules (l2 alerts, l6 recording)
+        run: |
+          docker run --rm --entrypoint sh -v "$PWD/prometheus:/etc/prometheus:ro" "$PROMETHEUS_IMAGE" -c \
+            'promtool check rules /etc/prometheus/l2-alerting-rules/*.yml /etc/prometheus/l6-recording-rules-federation/recording-rules.yml'
+      - name: promtool test rules
+        run: |
+          docker run --rm --entrypoint sh -v "$PWD/prometheus:/etc/prometheus:ro" "$PROMETHEUS_IMAGE" -c \
+            'promtool test rules /etc/prometheus/l2-alerting-rules/tests/*.yml /etc/prometheus/l6-recording-rules-federation/tests/*.yml'
+      - name: amtool check-config (l5)
+        run: |
+          docker run --rm --entrypoint amtool -v "$PWD/prometheus/l5-alertmanager:/cfg:ro" "$ALERTMANAGER_IMAGE" \
+            check-config /cfg/alertmanager.yml
+
+  backends:
+    name: loki tempo otel alloy config validation (l3 l4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: loki -verify-config
+        run: |
+          docker run --rm -v "$PWD/loki/l3-loki-config:/cfg:ro" "$LOKI_IMAGE" \
+            -config.file=/cfg/loki-config.yml -verify-config
+      - name: tempo -config.verify
+        run: |
+          docker run --rm -v "$PWD/tempo/l4-tempo-config:/cfg:ro" "$TEMPO_IMAGE" \
+            -target=all -config.file=/cfg/tempo-config.yml -config.verify=true
+      - name: otelcol validate
+        run: |
+          docker run --rm -v "$PWD/opentelemetry/l4-otel-collector:/cfg:ro" "$OTELCOL_IMAGE" \
+            validate --config=/cfg/otel-collector-config.yml
+      - name: alloy validate
+        run: |
+          docker run --rm -v "$PWD/loki/alloy:/cfg:ro" "$ALLOY_IMAGE" \
+            validate /cfg/config.alloy
+
+  exporter:
+    name: go exporter (l-max)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: custom-exporter/l-max-go-exporter
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: custom-exporter/l-max-go-exporter/go.mod
+          cache-dependency-path: custom-exporter/l-max-go-exporter/go.sum
+      - name: go.mod and go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - name: go vet
+        run: go vet ./...
+      - name: go build
+        run: go build ./...
+      - name: go test
+        run: go test -race -count=1 ./...
+
+  stack-smoke:
+    name: docker compose up --wait + smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: compose config
+        run: docker compose -f docker-compose-full-stack.yml config --quiet
+      - name: up --wait
+        run: docker compose -f docker-compose-full-stack.yml up -d --build --wait --wait-timeout 300
+      - name: smoke test
+        run: ./scripts/smoke-test.sh
+      - name: container state and logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose-full-stack.yml ps -a
+          docker compose -f docker-compose-full-stack.yml logs --no-color --tail=80
+      - name: tear down
+        if: always()
+        run: docker compose -f docker-compose-full-stack.yml down -v

@@ -2,6 +2,7 @@ package main
 
 import (
 	"math/rand"
+	"runtime"
 	"sync"
 	"time"
 
@@ -12,8 +13,8 @@ import (
 type AppCollector struct {
 	mu sync.Mutex
 
-	requestsTotal *prometheus.CounterVec
-	requestErrors *prometheus.CounterVec
+	requestsTotal   *prometheus.CounterVec
+	requestErrors   *prometheus.CounterVec
 	requestDuration *prometheus.HistogramVec
 	activeRequests  *prometheus.GaugeVec
 	buildInfo       *prometheus.GaugeVec
@@ -66,7 +67,7 @@ func NewAppCollector(namespace string) *AppCollector {
 	}
 
 	// Set static build info
-	c.buildInfo.WithLabelValues("1.0.0", "go1.22", "abc1234").Set(1)
+	c.buildInfo.WithLabelValues("1.0.0", runtime.Version(), "dev").Set(1)
 
 	return c
 }
