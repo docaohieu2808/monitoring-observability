@@ -156,7 +156,7 @@ services:
       - -config.file=/etc/tempo/tempo-config.yml
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.163.2
+    image: otel/opentelemetry-collector-contrib:0.164.0
     container_name: otel-collector
     restart: unless-stopped
     ports:
